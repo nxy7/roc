@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -85,36 +86,18 @@ size_t roc_str_len(struct RocStr str) {
   }
 }
 
-extern void roc__mainForHost_1_exposed_generic(struct RocStr *string);
+struct MyStruct { uint8_t x; uint8_t y; };
+extern void roc__mainForHost_1_exposed_generic(struct MyStruct *out);
 
 int main() {
 
-  struct RocStr str;
-  roc__mainForHost_1_exposed_generic(&str);
+  struct MyStruct r;
+  roc__mainForHost_1_exposed_generic(&r);
 
-  // Determine str_len and the str_bytes pointer,
-  // taking into account the small string optimization.
-  size_t str_len = roc_str_len(str);
-  char* str_bytes;
 
-  if (is_small_str(str)) {
-    str_bytes = (char*)&str;
-  } else {
-    str_bytes = str.bytes;
-  }
+  int x = r.x;
+  int y = r.y;
 
-  // Write to stdout
-  if (write(1, str_bytes, str_len) >= 0) {
-    // Writing succeeded!
-
-    // NOTE: the string is a static string, read from in the binary
-    // if you make it a heap-allocated string, it'll be leaked here
-    return 0;
-  } else {
-    printf("Error writing to stdout: %s\n", strerror(errno));
-
-    // NOTE: the string is a static string, read from in the binary
-    // if you make it a heap-allocated string, it'll be leaked here
-    return 1;
-  }
+  int sum = x + y;
+  printf("%d + %d = %d\n", x, y, sum);
 }

@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Monotonic = std.builtin.AtomicOrder.Monotonic;
 
 const DEBUG_INCDEC = false;
 const DEBUG_TESTING_ALLOC = false;
@@ -181,7 +180,10 @@ const Refcount = enum {
     atomic,
 };
 
-const RC_TYPE = Refcount.normal;
+const RC_TYPE = Refcount.atomic;
+
+const MASK_HIGHEST: isize = @bitCast(@as(usize, 1 << (@bitSizeOf(isize) - 1)));
+const MASK_REST: isize = ~MASK_HIGHEST;
 
 pub fn increfRcPtrC(ptr_to_refcount: *isize, amount: isize) callconv(.C) void {
     if (RC_TYPE == Refcount.none) return;
@@ -191,7 +193,8 @@ pub fn increfRcPtrC(ptr_to_refcount: *isize, amount: isize) callconv(.C) void {
     }
 
     // Ensure that the refcount is not whole program lifetime.
-    if (ptr_to_refcount.* != REFCOUNT_MAX_ISIZE) {
+    const rc = ptr_to_refcount.*;
+    if (rc != REFCOUNT_MAX_ISIZE) {
         // Note: we assume that a refcount will never overflow.
         // As such, we do not need to cap incrementing.
         switch (RC_TYPE) {
@@ -209,7 +212,7 @@ pub fn increfRcPtrC(ptr_to_refcount: *isize, amount: isize) callconv(.C) void {
                 ptr_to_refcount.* += amount;
             },
             Refcount.atomic => {
-                _ = @atomicRmw(isize, ptr_to_refcount, std.builtin.AtomicRmwOp.Add, amount, Monotonic);
+                _ = @atomicRmw(isize, ptr_to_refcount, .Add, amount, .Monotonic);
             },
             Refcount.none => unreachable,
         }
@@ -371,8 +374,7 @@ inline fn decref_ptr_to_refcount(
                 }
             },
             Refcount.atomic => {
-                var last = @atomicRmw(isize, &refcount_ptr[0], std.builtin.AtomicRmwOp.Sub, 1, Monotonic);
-                if (last == REFCOUNT_ONE_ISIZE) {
+                if (@atomicLoad(isize, &refcount_ptr[0], .Acquire) == REFCOUNT_ONE_ISIZE or @atomicRmw(isize, &refcount_ptr[0], .Sub, 1, .AcqRel) == REFCOUNT_ONE_ISIZE) {
                     free_ptr_to_refcount(refcount_ptr, alignment, elements_refcounted);
                 }
             },

@@ -26,8 +26,8 @@ use crate::llvm::{
     bitcode::{
         call_bitcode_fn, call_bitcode_fn_fixing_for_convention, call_bitcode_fn_returning_record,
         call_bitcode_fn_with_record_arg, call_list_bitcode_fn, call_str_bitcode_fn,
-        call_void_bitcode_fn, pass_list_or_string_to_zig_32bit, pass_string_to_zig_wasm,
-        BitcodeReturns,
+        call_void_bitcode_fn, pass_list_or_string_to_zig_32bit, pass_string_to_zig_64bit,
+        pass_string_to_zig_wasm, BitcodeReturns,
     },
     build::{
         cast_basic_basic, complex_bitcast_check_size, create_entry_block_alloca,
@@ -269,6 +269,7 @@ pub(crate) fn run_low_level<'a, 'ctx>(
                         }
                     };
 
+                    let string = pass_string_to_zig_64bit(env, string).as_basic_value_enum();
                     if cc_return_by_pointer {
                         let bitcode_return_type = zig_num_parse_result_type(env, type_name);
 
@@ -836,22 +837,13 @@ pub(crate) fn run_low_level<'a, 'ctx>(
             // List.concatUtf8: List U8, Str -> List U8
             arguments!(list, string);
 
-            match env.target.ptr_width() {
-                PtrWidth::Bytes4 => call_str_bitcode_fn(
-                    env,
-                    &[list, string],
-                    &[],
-                    BitcodeReturns::List,
-                    bitcode::LIST_CONCAT_UTF8,
-                ),
-                PtrWidth::Bytes8 => call_list_bitcode_fn(
-                    env,
-                    &[list.into_struct_value()],
-                    &[string],
-                    BitcodeReturns::List,
-                    bitcode::LIST_CONCAT_UTF8,
-                ),
-            }
+            call_str_bitcode_fn(
+                env,
+                &[list, string],
+                &[],
+                BitcodeReturns::List,
+                bitcode::LIST_CONCAT_UTF8,
+            )
         }
         NumToStr => {
             // Num.toStr : Num a -> Str

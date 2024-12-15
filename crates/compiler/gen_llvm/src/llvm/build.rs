@@ -10,7 +10,7 @@ use crate::llvm::memcpy::build_memcpy;
 use crate::llvm::refcounting::{
     build_reset, decrement_refcount_layout, increment_refcount_layout, PointerToRefcount,
 };
-use crate::llvm::struct_::{struct_from_fields, RocStruct};
+use crate::llvm::struct_::RocStruct;
 use crate::llvm::{erased, fn_ptr};
 use bumpalo::collections::Vec;
 use bumpalo::Bump;
@@ -1572,7 +1572,6 @@ pub(crate) fn build_exp_expr<'a, 'ctx>(
             build_tag(
                 env,
                 layout_interner,
-                layout,
                 scope,
                 union_layout,
                 *tag_id,
@@ -1851,6 +1850,10 @@ pub(crate) fn build_exp_expr<'a, 'ctx>(
                     )
                 }
                 UnionLayout::NonRecursive(tag_layouts) => {
+                    let field_layouts = tag_layouts[*tag_id as usize];
+                    let struct_layout = LayoutRepr::struct_(field_layouts);
+                    let struct_type = basic_type_from_layout(env, layout_interner, struct_layout);
+
                     let union_data = env
                         .builder
                         .build_extract_value(
@@ -1859,20 +1862,18 @@ pub(crate) fn build_exp_expr<'a, 'ctx>(
                             "union_access_data",
                         )
                         .unwrap();
+                    let union_data = cast_basic_basic(env, union_data, struct_type);
 
                     let name = env.arena.alloc(format!("union_field_access_{index}"));
                     let field_value = env
                         .builder
-                        .build_extract_value(union_data.into_array_value(), *index as u32, name)
+                        .build_extract_value(union_data.into_struct_value(), *index as u32, name)
                         .unwrap();
-
-                    let field_layouts = tag_layouts[*tag_id as usize];
-                    let field_layout = field_layouts[*index as usize];
 
                     use_roc_value(
                         env,
                         layout_interner,
-                        layout_interner.get_repr(field_layout),
+                        layout_interner.get_repr(field_layouts[*index as usize]),
                         field_value,
                         "union_field",
                     )
@@ -2266,7 +2267,6 @@ fn build_tag_fields<'a, 'r, 'ctx, 'env>(
 fn build_tag<'a, 'ctx>(
     env: &Env<'a, 'ctx, '_>,
     layout_interner: &STLayoutInterner<'a>,
-    layout: InLayout<'_>,
     scope: &Scope<'a, 'ctx>,
     union_layout: &UnionLayout<'a>,
     tag_id: TagIdIntType,
@@ -2285,7 +2285,8 @@ fn build_tag<'a, 'ctx>(
 
             let roc_union = RocUnion::tagged_from_slices(layout_interner, env.context, tags);
 
-            if layout_interner.is_passed_by_reference_internal(layout) {
+            let union_repr = LayoutRepr::Union(*union_layout);
+            if union_repr.is_passed_by_reference_internal(layout_interner) {
                 let tag_alloca =
                     create_entry_block_alloca(env, roc_union.struct_type(), "tag_alloca");
                 roc_union.write_struct_data(
@@ -2299,11 +2300,10 @@ fn build_tag<'a, 'ctx>(
 
                 tag_alloca.into()
             } else {
-                let data_type =
-                    basic_type_from_layout(env, layout_interner, layout_interner.get_repr(layout))
-                        .into_struct_type()
-                        .get_field_type_at_index(RocUnion::TAG_DATA_INDEX)
-                        .unwrap();
+                let data_type = basic_type_from_layout(env, layout_interner, union_repr)
+                    .into_struct_type()
+                    .get_field_type_at_index(RocUnion::TAG_DATA_INDEX)
+                    .unwrap();
                 let data = cast_basic_basic(env, data.as_basic_value_enum(), data_type);
 
                 let mut struct_value = roc_union.struct_type().const_zero().into();

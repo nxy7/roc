@@ -200,12 +200,16 @@ pub fn argument_type_from_union_layout<'a, 'ctx>(
     layout_interner: &STLayoutInterner<'a>,
     union_layout: &UnionLayout<'_>,
 ) -> BasicTypeEnum<'ctx> {
-    let heap_type = basic_type_from_union_layout(env, layout_interner, union_layout);
+    let basic_type = basic_type_from_union_layout(env, layout_interner, union_layout);
 
     if let UnionLayout::NonRecursive(_) = union_layout {
-        env.context.ptr_type(AddressSpace::default()).into()
+        if LayoutRepr::Union(*union_layout).is_passed_by_reference_internal(layout_interner) {
+            env.context.ptr_type(AddressSpace::default()).into()
+        } else {
+            basic_type
+        }
     } else {
-        heap_type
+        basic_type
     }
 }
 

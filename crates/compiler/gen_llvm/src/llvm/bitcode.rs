@@ -1057,7 +1057,7 @@ pub(crate) fn pass_string_to_zig_wasm<'ctx>(
     string_alloca
 }
 
-fn pass_string_to_zig_64bit<'ctx>(
+pub(crate) fn pass_string_to_zig_64bit<'ctx>(
     env: &Env<'_, 'ctx, '_>,
     string: BasicValueEnum<'ctx>,
 ) -> PointerValue<'ctx> {

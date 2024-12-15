@@ -930,7 +930,10 @@ fn build_tag_eq_help<'a, 'ctx>(
             // we're comparing empty tag unions; this code is effectively unreachable
             env.builder.new_build_unreachable();
         }
-        NonRecursive(tags) => {
+        NonRecursive(tags)
+            if LayoutRepr::Union(*union_layout)
+                .is_passed_by_reference_internal(layout_interner) =>
+        {
             let ptr_equal = env.builder.new_build_int_compare(
                 IntPredicate::EQ,
                 env.builder
@@ -1001,6 +1004,10 @@ fn build_tag_eq_help<'a, 'ctx>(
                     env.builder.new_build_unreachable();
                 }
             }
+        }
+        NonRecursive(tags) => {
+            // NonRecursive union passed by value.
+            todo!()
         }
         Recursive(tags) => {
             let ptr_equal = env.builder.new_build_int_compare(

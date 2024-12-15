@@ -1711,6 +1711,9 @@ fn modify_refcount_nonrecursive_help<'a, 'ctx>(
 
     // Add args to scope
     let arg_symbol = Symbol::ARG_1;
+    if !fn_val.get_first_param().unwrap().is_pointer_value() {
+        todo!();
+    }
     let arg_ptr = fn_val.get_param_iter().next().unwrap().into_pointer_value();
 
     arg_ptr.set_name(arg_symbol.as_str(&env.interns));

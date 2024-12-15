@@ -238,7 +238,7 @@ pub trait LayoutInterner<'a>: Sized {
     }
 
     fn is_passed_by_reference(&self, layout: InLayout<'a>) -> bool {
-        self.get_repr(layout).is_passed_by_reference(self)
+        self.get_repr(layout).is_passed_by_reference_internal(self)
     }
 
     fn runtime_representation(&self, layout: InLayout<'a>) -> LayoutRepr<'a> {

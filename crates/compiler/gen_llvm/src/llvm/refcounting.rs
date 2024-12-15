@@ -939,15 +939,8 @@ fn modify_refcount_str_help<'a, 'ctx>(
     let parent = fn_val;
 
     let str_type = zig_str_type(env);
-    let str_wrapper = if LayoutRepr::Builtin(Builtin::Str).is_passed_by_reference(layout_interner) {
-        env.builder
-            .new_build_load(str_type, arg_val.into_pointer_value(), "load_str_to_stack")
-    } else {
-        // it's already a struct, just do nothing
-        debug_assert!(arg_val.is_struct_value());
-        arg_val
-    };
-    let str_wrapper = str_wrapper.into_struct_value();
+    debug_assert!(arg_val.is_struct_value());
+    let str_wrapper = arg_val;
 
     let capacity = builder
         .build_extract_value(str_wrapper, Builtin::WRAPPER_CAPACITY, "read_str_capacity")

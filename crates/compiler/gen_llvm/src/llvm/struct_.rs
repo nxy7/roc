@@ -50,7 +50,7 @@ impl<'ctx> RocStruct<'ctx> {
         scope: &Scope<'a, 'ctx>,
         sorted_fields: &[Symbol],
     ) -> Self {
-        let passed_by_ref = layout_repr.is_passed_by_reference(layout_interner);
+        let passed_by_ref = layout_repr.is_passed_by_reference_internal(layout_interner);
 
         if passed_by_ref {
             let struct_alloca =

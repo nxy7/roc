@@ -168,7 +168,7 @@ pub fn argument_type_from_layout<'a, 'ctx>(
         Builtin(_) => {
             let base = basic_type_from_layout(env, layout_interner, layout);
 
-            if layout.is_passed_by_reference(layout_interner) {
+            if layout.is_passed_by_reference_internal(layout_interner) {
                 env.context.ptr_type(AddressSpace::default()).into()
             } else {
                 base
@@ -188,7 +188,7 @@ fn argument_type_from_struct_layout<'a, 'ctx>(
     debug_assert!(matches!(struct_layout, LayoutRepr::Struct(_)));
     let stack_type = basic_type_from_layout(env, layout_interner, struct_layout);
 
-    if struct_layout.is_passed_by_reference(layout_interner) {
+    if struct_layout.is_passed_by_reference_internal(layout_interner) {
         env.context.ptr_type(AddressSpace::default()).into()
     } else {
         stack_type

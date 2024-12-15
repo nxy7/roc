@@ -2684,34 +2684,26 @@ impl<'a> LayoutRepr<'a> {
         false // TODO this should use is_zero_sized once doing so doesn't break things!
     }
 
-    pub fn is_passed_by_reference<I>(&self, interner: &I) -> bool
+    // Returns true if a value should be passed by reference during internal function calls.
+    // NOT to be used when dealing with C FFI.
+    pub fn is_passed_by_reference_internal<I>(&self, interner: &I) -> bool
     where
         I: LayoutInterner<'a>,
     {
         match self {
-            LayoutRepr::Builtin(builtin) => {
-                use Builtin::*;
-
-                match interner.target().ptr_width() {
-                    PtrWidth::Bytes4 => {
-                        // more things fit into a register
-                        false
-                    }
-                    PtrWidth::Bytes8 => {
-                        // currently, only Str is passed by-reference internally
-                        matches!(builtin, Str)
-                    }
-                }
+            LayoutRepr::Builtin(_) => {
+                // All of our builtins are 3 register sizes or smaller.
+                // For internal passing, they should be passed by value.
+                false
             }
-            LayoutRepr::Union(UnionLayout::NonRecursive(_)) => true,
-            LayoutRepr::Struct(_) => {
-                // TODO: write tests for this!
+            LayoutRepr::Struct(_) | LayoutRepr::Union(UnionLayout::NonRecursive(_)) => {
+                // Only pass by reference if large.
                 self.stack_size(interner) as usize > interner.target().max_by_value_size()
             }
 
             LayoutRepr::LambdaSet(lambda_set) => interner
                 .get_repr(lambda_set.runtime_representation())
-                .is_passed_by_reference(interner),
+                .is_passed_by_reference_internal(interner),
             _ => false,
         }
     }

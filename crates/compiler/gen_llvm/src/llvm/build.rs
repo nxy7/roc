@@ -2968,7 +2968,7 @@ pub fn load_roc_value<'a, 'ctx>(
 ) -> BasicValueEnum<'ctx> {
     let basic_type = basic_type_from_layout(env, layout_interner, layout);
 
-    if layout.is_passed_by_reference(layout_interner) {
+    if layout.is_passed_by_reference_internal(layout_interner) {
         let alloca = create_entry_block_alloca(env, basic_type, name);
 
         store_roc_value(env, layout_interner, layout, alloca, source.into());
@@ -2986,7 +2986,7 @@ pub fn use_roc_value<'a, 'ctx>(
     source: BasicValueEnum<'ctx>,
     name: &str,
 ) -> BasicValueEnum<'ctx> {
-    if layout.is_passed_by_reference(layout_interner) {
+    if layout.is_passed_by_reference_internal(layout_interner) {
         let alloca = create_entry_block_alloca(
             env,
             basic_type_from_layout(env, layout_interner, layout),
@@ -3031,7 +3031,7 @@ pub fn store_roc_value<'a, 'ctx>(
     destination: PointerValue<'ctx>,
     value: BasicValueEnum<'ctx>,
 ) {
-    if layout.is_passed_by_reference(layout_interner) {
+    if layout.is_passed_by_reference_internal(layout_interner) {
         debug_assert!(value.is_pointer_value());
 
         build_memcpy(
@@ -3591,7 +3591,7 @@ fn build_return<'a, 'ctx>(
             debug_assert!(out_parameter.is_pointer_value());
 
             let destination = out_parameter.into_pointer_value();
-            if layout.is_passed_by_reference(layout_interner) {
+            if layout.is_passed_by_reference_internal(layout_interner) {
                 debug_assert!(
                     value.is_pointer_value(),
                     "{:?}: {:?}\n{:?}",
@@ -6227,7 +6227,7 @@ fn call_roc_function_help<'a, 'ctx>(
             // roc functions should have the fast calling convention
             call.set_call_convention(FAST_CALL_CONV);
 
-            if result_layout.is_passed_by_reference(layout_interner) {
+            if result_layout.is_passed_by_reference_internal(layout_interner) {
                 result_alloca.into()
             } else {
                 env.builder.new_build_load(
@@ -6359,7 +6359,9 @@ fn to_cc_type<'a, 'ctx>(
         LayoutRepr::Struct(_) => {
             let stack_type = basic_type_from_layout(env, layout_interner, layout_repr);
 
-            if layout_repr.is_passed_by_reference(layout_interner) {
+            // TODO: this is one of our big c-abi problems.
+            // This function is meant to be for internal abi, not c abi.
+            if layout_repr.is_passed_by_reference_internal(layout_interner) {
                 env.context.ptr_type(AddressSpace::default()).into()
             } else {
                 stack_type
@@ -6395,7 +6397,7 @@ pub(crate) enum RocReturn {
 
 impl RocReturn {
     fn roc_return_by_pointer(interner: &STLayoutInterner, layout: LayoutRepr) -> bool {
-        layout.is_passed_by_reference(interner)
+        layout.is_passed_by_reference_internal(interner)
     }
 
     pub(crate) fn from_layout<'a>(

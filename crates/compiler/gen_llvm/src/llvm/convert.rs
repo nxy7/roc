@@ -11,7 +11,6 @@ use roc_mono::layout::{
     round_up_to_alignment, Builtin, FunctionPointer, InLayout, Layout, LayoutInterner, LayoutRepr,
     STLayoutInterner, UnionLayout,
 };
-use roc_target::Target;
 
 use super::struct_::RocStruct;
 
@@ -307,6 +306,13 @@ impl<'ctx> RocUnion<'ctx> {
         self.struct_type
     }
 
+    pub fn tag_type(&self, env: &Env<'_, 'ctx, '_>) -> IntType<'ctx> {
+        match self.tag_type.unwrap() {
+            TagType::I8 => env.context.i8_type(),
+            TagType::I16 => env.context.i16_type(),
+        }
+    }
+
     pub fn tagged_from_slices(
         interner: &STLayoutInterner,
         context: &'ctx Context,
@@ -439,14 +445,6 @@ impl<'ctx> RocUnion<'ctx> {
 
             env.builder.new_build_store(tag_id_ptr, tag_id);
         }
-    }
-}
-
-/// The int type that the C ABI turns our RocList/RocStr into
-pub fn str_list_int(ctx: &Context, target: Target) -> IntType<'_> {
-    match target.ptr_width() {
-        roc_target::PtrWidth::Bytes4 => ctx.i64_type(),
-        roc_target::PtrWidth::Bytes8 => ctx.i128_type(),
     }
 }
 

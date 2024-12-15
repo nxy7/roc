@@ -58,6 +58,7 @@ use roc_target::{PtrWidth, Target};
 use std::convert::TryInto;
 use std::path::Path;
 
+use super::build_str::store_str;
 use super::convert::{struct_type_from_union_layout, RocUnion};
 use super::intrinsics::{
     add_intrinsics, LLVM_FRAME_ADDRESS, LLVM_MEMSET_I32, LLVM_MEMSET_I64, LLVM_SETJMP,
@@ -933,18 +934,10 @@ impl<'a, 'ctx, 'env> Env<'a, 'ctx, 'env> {
         env: &Env<'a, 'ctx, 'env>,
         string: BasicValueEnum<'ctx>,
     ) -> BasicValueEnum<'ctx> {
-        match env.target.ptr_width() {
-            PtrWidth::Bytes4 => {
-                // we need to pass the string by reference, but we currently hold the value.
-                let alloca = create_entry_block_alloca(env, string.get_type(), "alloca_string");
-                env.builder.new_build_store(alloca, string);
-                alloca.into()
-            }
-            PtrWidth::Bytes8 => {
-                // string is already held by reference
-                string
-            }
-        }
+        // we need to pass the string by reference, but we currently hold the value.
+        let alloca = create_entry_block_alloca(env, string.get_type(), "alloca_string");
+        env.builder.new_build_store(alloca, string);
+        alloca.into()
     }
 
     pub fn new_debug_info(module: &Module<'ctx>) -> (DebugInfoBuilder<'ctx>, DICompileUnit<'ctx>) {
@@ -1321,36 +1314,11 @@ fn build_string_literal<'ctx>(env: &Env<'_, 'ctx, '_>, str_literal: &str) -> Bas
         let ptr = define_global_str_literal_ptr(env, str_literal);
         let number_of_elements = env.ptr_int().const_int(str_literal.len() as u64, false);
 
-        let alloca = const_str_alloca_ptr(env, ptr, number_of_elements, number_of_elements);
-
-        match env.target.ptr_width() {
-            PtrWidth::Bytes4 => {
-                env.builder
-                    .new_build_load(zig_str_type(env), alloca, "load_const_str")
-            }
-            PtrWidth::Bytes8 => alloca.into(),
-        }
+        store_str(env, ptr, number_of_elements, number_of_elements).as_basic_value_enum()
     }
 }
 
-fn const_str_alloca_ptr<'ctx>(
-    env: &Env<'_, 'ctx, '_>,
-    ptr: PointerValue<'ctx>,
-    len: IntValue<'ctx>,
-    cap: IntValue<'ctx>,
-) -> PointerValue<'ctx> {
-    let typ = zig_str_type(env);
-
-    let value = typ.const_named_struct(&[ptr.into(), len.into(), cap.into()]);
-
-    let alloca = create_entry_block_alloca(env, typ, "const_str_store");
-
-    env.builder.new_build_store(alloca, value);
-
-    alloca
-}
-
-fn small_str_ptr_width_8<'ctx>(env: &Env<'_, 'ctx, '_>, str_literal: &str) -> PointerValue<'ctx> {
+fn small_str_ptr_width_8<'ctx>(env: &Env<'_, 'ctx, '_>, str_literal: &str) -> StructValue<'ctx> {
     debug_assert_eq!(env.target.ptr_width() as u8, 8);
 
     let mut array = [0u8; 24];
@@ -1371,7 +1339,7 @@ fn small_str_ptr_width_8<'ctx>(env: &Env<'_, 'ctx, '_>, str_literal: &str) -> Po
     let ptr_type = env.context.ptr_type(address_space);
     let ptr = env.builder.new_build_int_to_ptr(ptr, ptr_type, "to_u8_ptr");
 
-    const_str_alloca_ptr(env, ptr, len, cap)
+    store_str(env, ptr, len, cap)
 }
 
 fn small_str_ptr_width_4<'ctx>(env: &Env<'_, 'ctx, '_>, str_literal: &str) -> StructValue<'ctx> {
@@ -1395,11 +1363,7 @@ fn small_str_ptr_width_4<'ctx>(env: &Env<'_, 'ctx, '_>, str_literal: &str) -> St
     let ptr_type = env.context.ptr_type(address_space);
     let ptr = env.builder.new_build_int_to_ptr(ptr, ptr_type, "to_u8_ptr");
 
-    struct_from_fields(
-        env,
-        zig_str_type(env),
-        [(0, ptr.into()), (1, len.into()), (2, cap.into())].into_iter(),
-    )
+    store_str(env, ptr, len, cap)
 }
 
 pub(crate) fn build_exp_call<'a, 'ctx>(
@@ -1608,6 +1572,7 @@ pub(crate) fn build_exp_expr<'a, 'ctx>(
             build_tag(
                 env,
                 layout_interner,
+                layout,
                 scope,
                 union_layout,
                 *tag_id,
@@ -1846,9 +1811,7 @@ pub(crate) fn build_exp_expr<'a, 'ctx>(
             let (argument, structure_layout) = scope.load_symbol_and_layout(structure);
 
             match union_layout {
-                UnionLayout::NonRecursive(tag_layouts) => {
-                    debug_assert!(argument.is_pointer_value());
-
+                UnionLayout::NonRecursive(tag_layouts) if argument.is_pointer_value() => {
                     let field_layouts = tag_layouts[*tag_id as usize];
 
                     let struct_layout = LayoutRepr::struct_(field_layouts);
@@ -1885,6 +1848,33 @@ pub(crate) fn build_exp_expr<'a, 'ctx>(
                         layout_interner.get_repr(field_layouts[*index as usize]),
                         element_ptr,
                         "load_element",
+                    )
+                }
+                UnionLayout::NonRecursive(tag_layouts) => {
+                    let union_data = env
+                        .builder
+                        .build_extract_value(
+                            argument.into_struct_value(),
+                            RocUnion::TAG_DATA_INDEX,
+                            "union_access_data",
+                        )
+                        .unwrap();
+
+                    let name = env.arena.alloc(format!("union_field_access_{index}"));
+                    let field_value = env
+                        .builder
+                        .build_extract_value(union_data.into_array_value(), *index as u32, name)
+                        .unwrap();
+
+                    let field_layouts = tag_layouts[*tag_id as usize];
+                    let field_layout = field_layouts[*index as usize];
+
+                    use_roc_value(
+                        env,
+                        layout_interner,
+                        layout_interner.get_repr(field_layout),
+                        field_value,
+                        "union_field",
                     )
                 }
                 UnionLayout::Recursive(tag_layouts) => {
@@ -2226,7 +2216,7 @@ fn build_tag_field_value<'a, 'ctx>(
                 "cast_recursive_pointer",
             )
             .into()
-    } else if layout_interner.is_passed_by_reference(tag_field_layout) {
+    } else if layout_interner.is_passed_by_reference_internal(tag_field_layout) {
         debug_assert!(value.is_pointer_value());
 
         // NOTE: we rely on this being passed to `store_roc_value` so that
@@ -2276,6 +2266,7 @@ fn build_tag_fields<'a, 'r, 'ctx, 'env>(
 fn build_tag<'a, 'ctx>(
     env: &Env<'a, 'ctx, '_>,
     layout_interner: &STLayoutInterner<'a>,
+    layout: InLayout<'_>,
     scope: &Scope<'a, 'ctx>,
     union_layout: &UnionLayout<'a>,
     tag_id: TagIdIntType,
@@ -2294,17 +2285,45 @@ fn build_tag<'a, 'ctx>(
 
             let roc_union = RocUnion::tagged_from_slices(layout_interner, env.context, tags);
 
-            let tag_alloca = create_entry_block_alloca(env, roc_union.struct_type(), "tag_alloca");
-            roc_union.write_struct_data(
-                env,
-                layout_interner,
-                tag_alloca,
-                data,
-                data_layout_repr,
-                Some(tag_id as _),
-            );
+            if layout_interner.is_passed_by_reference_internal(layout) {
+                let tag_alloca =
+                    create_entry_block_alloca(env, roc_union.struct_type(), "tag_alloca");
+                roc_union.write_struct_data(
+                    env,
+                    layout_interner,
+                    tag_alloca,
+                    data,
+                    data_layout_repr,
+                    Some(tag_id as _),
+                );
 
-            tag_alloca.into()
+                tag_alloca.into()
+            } else {
+                let data_type =
+                    basic_type_from_layout(env, layout_interner, layout_interner.get_repr(layout))
+                        .into_struct_type()
+                        .get_field_type_at_index(RocUnion::TAG_DATA_INDEX)
+                        .unwrap();
+                let data = cast_basic_basic(env, data.as_basic_value_enum(), data_type);
+
+                let mut struct_value = roc_union.struct_type().const_zero().into();
+                struct_value = env
+                    .builder
+                    .build_insert_value(
+                        struct_value,
+                        data.as_basic_value_enum(),
+                        RocUnion::TAG_DATA_INDEX,
+                        "insert_data",
+                    )
+                    .unwrap();
+
+                let tag_id = roc_union.tag_type(env).const_int(tag_id as u64, false);
+                struct_value = env
+                    .builder
+                    .build_insert_value(struct_value, tag_id, RocUnion::TAG_ID_INDEX, "insert_id")
+                    .unwrap();
+                struct_value.as_basic_value_enum()
+            }
         }
         UnionLayout::Recursive(tags) => {
             debug_assert!(union_size > 1);
@@ -2598,10 +2617,12 @@ pub fn get_tag_id<'a, 'ctx>(
 
     match union_layout {
         UnionLayout::NonRecursive(_) => {
-            debug_assert!(argument.is_pointer_value(), "{argument:?}");
-
-            let argument_ptr = argument.into_pointer_value();
-            get_tag_id_wrapped(env, layout_interner, *union_layout, argument_ptr)
+            if argument.is_pointer_value() {
+                let argument_ptr = argument.into_pointer_value();
+                get_tag_id_wrapped(env, layout_interner, *union_layout, argument_ptr)
+            } else {
+                get_tag_id_non_recursive(env, argument.into_struct_value())
+            }
         }
         UnionLayout::Recursive(_) => {
             let argument_ptr = argument.into_pointer_value();
@@ -3182,15 +3203,16 @@ pub(crate) fn build_exp_stmt<'a, 'ctx>(
                     );
 
                     use crate::llvm::scope::JoinPointArg::*;
-                    let joinpoint_arg = if layout_interner.is_passed_by_reference(param.layout) {
-                        Alloca(create_entry_block_alloca(
-                            env,
-                            basic_type,
-                            "joinpoint_arg_alloca",
-                        ))
-                    } else {
-                        Phi(env.builder.new_build_phi(basic_type, "joinpointarg"))
-                    };
+                    let joinpoint_arg =
+                        if layout_interner.is_passed_by_reference_internal(param.layout) {
+                            Alloca(create_entry_block_alloca(
+                                env,
+                                basic_type,
+                                "joinpoint_arg_alloca",
+                            ))
+                        } else {
+                            Phi(env.builder.new_build_phi(basic_type, "joinpointarg"))
+                        };
 
                     joinpoint_args.push(joinpoint_arg);
                 }
@@ -5184,7 +5206,7 @@ fn make_good_roc_result<'a, 'ctx>(
         .build_insert_value(v1, context.i64_type().const_zero(), 0, "set_no_error")
         .unwrap();
 
-    let v3 = if layout_interner.is_passed_by_reference(return_layout) {
+    let v3 = if layout_interner.is_passed_by_reference_internal(return_layout) {
         let loaded = env.builder.new_build_load(
             return_type,
             return_value.into_pointer_value(),
@@ -5923,7 +5945,7 @@ fn build_closure_caller<'a, 'ctx>(
     let closure_layout = lambda_set.runtime_representation();
     let layouts_it = arguments.iter().chain(std::iter::once(&closure_layout));
     for (param, layout) in evaluator_arguments.iter_mut().zip(layouts_it) {
-        if param.is_pointer_value() && !layout_interner.is_passed_by_reference(*layout) {
+        if param.is_pointer_value() && !layout_interner.is_passed_by_reference_internal(*layout) {
             let basic_type =
                 basic_type_from_layout(env, layout_interner, layout_interner.get_repr(*layout));
             *param = builder.new_build_load(basic_type, param.into_pointer_value(), "load_param");
@@ -5950,7 +5972,7 @@ fn build_closure_caller<'a, 'ctx>(
             &evaluator_arguments,
         );
 
-        if layout_interner.is_passed_by_reference(return_layout) {
+        if layout_interner.is_passed_by_reference_internal(return_layout) {
             build_memcpy(
                 env,
                 layout_interner,

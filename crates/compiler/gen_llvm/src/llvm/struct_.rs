@@ -203,7 +203,7 @@ fn build_struct_value_helper<'a, 'ctx>(
             );
             field_types.push(field_type);
 
-            if layout_interner.is_passed_by_reference(field_layout) {
+            if layout_interner.is_passed_by_reference_internal(field_layout) {
                 let field_value = env.builder.new_build_load(
                     field_type,
                     field_expr.into_pointer_value(),

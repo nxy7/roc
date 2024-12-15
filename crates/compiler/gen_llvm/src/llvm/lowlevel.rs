@@ -129,30 +129,13 @@ pub(crate) fn run_low_level<'a, 'ctx>(
         StrJoinWith => {
             // Str.joinWith : List Str, Str -> Str
             arguments!(list, string);
-
-            match env.target.ptr_width() {
-                PtrWidth::Bytes4 => {
-                    // list and string are both stored as structs on the stack on 32-bit targets
-                    call_str_bitcode_fn(
-                        env,
-                        &[list, string],
-                        &[],
-                        BitcodeReturns::Str,
-                        bitcode::STR_JOIN_WITH,
-                    )
-                }
-                PtrWidth::Bytes8 => {
-                    // on 64-bit targets, strings are stored as pointers, but that is not what zig expects
-
-                    call_list_bitcode_fn(
-                        env,
-                        &[list.into_struct_value()],
-                        &[string],
-                        BitcodeReturns::Str,
-                        bitcode::STR_JOIN_WITH,
-                    )
-                }
-            }
+            call_str_bitcode_fn(
+                env,
+                &[list, string],
+                &[],
+                BitcodeReturns::Str,
+                bitcode::STR_JOIN_WITH,
+            )
         }
         StrStartsWith => {
             // Str.startsWith : Str, Str -> Bool

@@ -485,7 +485,7 @@ fn build_rc_wrapper<'a, 'ctx>(
             // even though this looks like a `load_roc_value`, that gives segfaults in practice.
             // I suspect it has something to do with the lifetime of the alloca that is created by
             // `load_roc_value`
-            let value = if layout_interner.is_passed_by_reference(layout) {
+            let value = if layout_interner.is_passed_by_reference_internal(layout) {
                 value_ptr.into()
             } else {
                 env.builder
@@ -719,7 +719,7 @@ pub fn build_compare_wrapper<'a, 'ctx>(
                     );
 
                     let closure_data: BasicMetadataValueEnum =
-                        if layout_interner.is_passed_by_reference(closure_data_repr) {
+                        if layout_interner.is_passed_by_reference_internal(closure_data_repr) {
                             closure_cast.into()
                         } else {
                             env.builder
@@ -848,9 +848,8 @@ impl<'ctx> BitcodeReturnValue<'ctx> {
             }
             BitcodeReturnValue::Str(result) => {
                 call_void_bitcode_fn(env, arguments, fn_name);
-
-                // we keep a string in the alloca
-                (*result).into()
+                env.builder
+                    .new_build_load(zig_str_type(env), *result, "load_str")
             }
             BitcodeReturnValue::Basic => call_bitcode_fn(env, arguments, fn_name),
         }
@@ -1059,11 +1058,16 @@ pub(crate) fn pass_string_to_zig_wasm<'ctx>(
 }
 
 fn pass_string_to_zig_64bit<'ctx>(
-    _env: &Env<'_, 'ctx, '_>,
+    env: &Env<'_, 'ctx, '_>,
     string: BasicValueEnum<'ctx>,
 ) -> PointerValue<'ctx> {
-    // we must pass strings by-pointer, and that is already how they are stored
-    string.into_pointer_value()
+    // we must pass strings by-pointer
+    let string_type = super::convert::zig_str_type(env);
+    let string_alloca = create_entry_block_alloca(env, string_type, "string_alloca");
+
+    env.builder.new_build_store(string_alloca, string);
+
+    string_alloca
 }
 
 pub(crate) fn pass_list_or_string_to_zig_32bit<'ctx>(

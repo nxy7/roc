@@ -6,7 +6,7 @@ use crate::llvm::build::{
 };
 use crate::llvm::build_list::{layout_refcounted, layout_width};
 use crate::llvm::build_str::str_allocation_ptr;
-use crate::llvm::convert::{basic_type_from_layout, zig_str_type, RocUnion};
+use crate::llvm::convert::{basic_type_from_layout, RocUnion};
 use crate::llvm::struct_::RocStruct;
 use bumpalo::collections::Vec;
 use inkwell::basic_block::BasicBlock;
@@ -938,9 +938,8 @@ fn modify_refcount_str_help<'a, 'ctx>(
 
     let parent = fn_val;
 
-    let str_type = zig_str_type(env);
     debug_assert!(arg_val.is_struct_value());
-    let str_wrapper = arg_val;
+    let str_wrapper = arg_val.into_struct_value();
 
     let capacity = builder
         .build_extract_value(str_wrapper, Builtin::WRAPPER_CAPACITY, "read_str_capacity")
@@ -1831,7 +1830,8 @@ fn modify_refcount_nonrecursive_help<'a, 'ctx>(
                     "modify_tag_field",
                 );
 
-                let field_value = if layout_interner.is_passed_by_reference(*field_layout) {
+                let field_value = if layout_interner.is_passed_by_reference_internal(*field_layout)
+                {
                     field_ptr.into()
                 } else {
                     env.builder.new_build_load(
